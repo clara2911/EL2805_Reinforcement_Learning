@@ -44,21 +44,21 @@ class Pos:
 
 
 class State:
-    def __init__(self, player_pos, minotaur_pos):
+    def __init__(self, player_pos, police_pos):
         self.player_pos = player_pos
-        self.minotaur_pos = minotaur_pos
+        self.police_pos = police_pos
 
     def __hash__(self):
-        return hash((self.player_pos, self.minotaur_pos))
+        return hash((self.player_pos, self.police_pos))
 
     def __eq__(self, o):
-        return self.player_pos == o.player_pos and self.minotaur_pos == o.minotaur_pos
+        return self.player_pos == o.player_pos and self.police_pos == o.police_pos
 
     def __str__(self):
-        return "Player: {}, Minotaur: {}".format(self.player_pos, self.minotaur_pos)
+        return "Player: {}, Police: {}".format(self.player_pos, self.police_pos)
 
     def is_dead(self):
-        return self.player_pos == self.minotaur_pos
+        return self.player_pos == self.police_pos
 
 class City:
 
@@ -118,7 +118,7 @@ class City:
                 s += 1
         return states, map
 
-    def __get_action(self, s, eps, Q):
+    def get_action(self, s, eps, Q):
         """
         selects an action from the possible actions at state s.
         :param s: current state
@@ -128,8 +128,9 @@ class City:
         """
         rand = np.random.uniform()
         if rand < eps:
-            # select an action for exploration
-            return random_choice(self.actions)
+            # select an action for exploration.
+            # list() because we want to select the keys ( "STAY" instead of Pos obj)
+            return random.choice(list(self.actions))
         else:
             # select an action for exploitation
             # TODO write exploitation = pick optimal action using reward estimate table Q
@@ -142,6 +143,10 @@ class City:
             :return next state index and corresponding transition prob.
         """
         # Compute the future position given current (state, action)
+        print("state:" , state)
+        print("state.player_pos:", state.player_pos)
+        print("action: ", action)
+        print("self.actions[action]: ", self.actions[action])
         new_player_pos = state.player_pos + self.actions[action]
         # Is the future position an impossible one ?
         agent_hitting_city_walls = not new_player_pos.within(self.city.shape) or \
@@ -163,7 +168,7 @@ class City:
 
         return next_states
 
-    def __move(self, state, action):
+    def move(self, state, action):
         return random.choice(self.__moves(state, action))
 
     def simulate(self, start, policy, method):
@@ -397,10 +402,15 @@ def q_learning(env, lambd, eps, n_iter):
     n_actions = env.n_actions
 
     Q = np.zeros((n_states, n_actions))
-    s = env.start_state
+
+    #TODO change this magic number
+    #State((0,0),(3,3))
+    #s = map[state_obj]
+    s = env.states[0]
+    #s = env.start_state
     for t in range(n_iter):
-        a = env.__get_action(s, eps, Q)
-        s_next, curr_reward = env.__move(s, a)
+        a = env.get_action(s, eps, Q)
+        s_next, curr_reward = env.move(s, a)
         lr = compute_lr(t)
         Q[s, a] = (1-lr)*Q[s, a] + lr*(curr_reward + lambd*np.max(Q[s_next, :]))
         s = s_next
@@ -423,11 +433,11 @@ def sarsa(env, lambd, eps, n_iter):
 
     Q = np.zeros((n_states, n_actions))
     s = env.start_state
-    a = env.__get_action(s, eps, Q)
+    a = env.get_action(s, eps, Q)
 
     for t in range(n_iter):
-        s_next, curr_reward = env.__move(s, a)
-        a_next = env.__get_action(s_next, eps, Q)
+        s_next, curr_reward = env.move(s, a)
+        a_next = env.get_action(s_next, eps, Q)
         curr_lr = compute_lr(t)
         Q[s, a] = (1-curr_lr)*Q[s, a] + curr_lr*(curr_reward + lambd*Q[s_next, a_next])
         s = s_next
