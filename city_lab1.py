@@ -1,17 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import time
 from IPython import display
 import random
-import math
 
-# Some colours
-LIGHT_RED    = '#FFC4CC'
-LIGHT_GREEN  = '#95FD99'
-BLACK        = '#000000'
-WHITE        = '#FFFFFF'
-LIGHT_PURPLE = '#E8D0FF'
-LIGHT_ORANGE = '#FAE0C3'
 
 class Pos:
     def __init__(self, r, c):
@@ -60,6 +51,7 @@ class State:
     def is_dead(self):
         return self.player_pos == self.police_pos
 
+
 class City:
 
     # Actions
@@ -80,8 +72,8 @@ class City:
 
     # Reward values
     BANK_REWARD = 1
-    CAUGHT_REWARD = -10
-    REST_REWARD = -100
+    POLICE_REWARD = -10
+    IMPOSSIBLE_REWARD = -100
 
     def __init__(self, city):
         """ Constructor of the environment City.
@@ -134,6 +126,7 @@ class City:
         else:
             # select an action for exploitation
             # TODO write exploitation = pick optimal action using reward estimate table Q
+            # this is not needed for a with Q-learning but it is needed for eps-greedy SARSA
             pass
 
     def __moves(self, state, action):
@@ -143,10 +136,6 @@ class City:
             :return next state index and corresponding transition prob.
         """
         # Compute the future position given current (state, action)
-        print("state:" , state)
-        print("state.player_pos:", state.player_pos)
-        print("action: ", action)
-        print("self.actions[action]: ", self.actions[action])
         new_player_pos = state.player_pos + self.actions[action]
         # Is the future position an impossible one ?
         agent_hitting_city_walls = not new_player_pos.within(self.city.shape) or \
@@ -169,61 +158,17 @@ class City:
         return next_states
 
     def move(self, state, action):
-        return random.choice(self.__moves(state, action))
+        reward = 0 # standard reward
+        next_s = random.choice(self.__moves(state, action))
 
-    def simulate(self, start, policy, method):
-        if method not in methods:
-            error = 'ERROR: the argument method must be in {}'.format(methods)
-            raise NameError(error)
-
-        path = list()
-        if method == 'DynProg':
-            # Deduce the horizon from the policy shape
-            horizon = policy.shape[1]
-            # Initialize current state and time
-            t = 0;
-            s = start;
-            # Add the starting position in the city to the path
-            path.append(start);
-            while t < horizon:
-                # Move to next state given the policy and the current state
-                next_s = self.__move(s, policy[self.map[s], t])
-                # Add the position in the city corresponding to the next state
-                # to the path
-                path.append(next_s)
-                # Update time and state for next iteration
-                t += 1
-                s = next_s
-        if method == 'ValIter':
-            # Initialize current state, next state and time
-            t = 0
-            s = start
-
-            # Loop while state is not the goal state
-            while True:
-                path.append(s)
-
-                # if our life is geometrically distributed, check whether we're still alive
-                if survival_factor is not None:
-                    if random.random() > survival_factor:
-                        break
-
-                if s.is_dead():
-                    break
-
-                if self.city[s.player_pos.unpack()] == 2:
-                    break
-
-                # Move to next state given the policy and the current state
-                next_s = self.__move(s, policy[self.map[s]])
-
-                # Update time and state for next iteration
-                t += 1
-
-                # Update state
-                s = next_s
-
-        return path
+        if next_s.player_pos == next_s.police_pos:
+            reward += self.POLICE_REWARD
+        if self.city[next_s.player_pos.unpack()] == 1:
+            reward += self.BANK_REWARD
+        agent_stayed = state.player_pos == next_s.player_pos
+        if agent_stayed and action != self.STAY:
+            reward += self.IMPOSSIBLE_REWARD
+        return next_s, reward
 
     def show(self):
         print('The states are :')
@@ -233,121 +178,6 @@ class City:
         print('The mapping of the states:')
         print(self.map)
 
-    def animate_solution(self, path, policy = None):
-
-        # Map a color to each cell in the city
-        col_map = {0: WHITE, 1: BLACK, 2: LIGHT_GREEN, -6: LIGHT_RED, -1: LIGHT_RED}
-
-        # Size of the city
-        rows, cols = self.city.shape
-
-        # Create figure of the size of the city
-        fig = plt.figure(1, figsize=(cols,rows))
-
-        # Remove the axis ticks and add title title
-        ax = plt.gca()
-        ax.set_title('Policy simulation')
-        ax.set_xticks([])
-        ax.set_yticks([])
-
-        # Give a color to each cell
-        colored_city = [[col_map[self.city[j,i]] for i in range(cols)] for j in range(rows)]
-
-        # Create figure of the size of the city
-        fig = plt.figure(1, figsize=(cols, rows))
-
-        # Create a table to color
-        grid = plt.table(cellText=None,
-                         cellColours=colored_city,
-                         cellLoc='center',
-                         loc=(0,0),
-                         edges='closed')
-
-        # Modify the height and width of the cells in the table
-        tc = grid.properties()['child_artists']
-        for cell in tc:
-            cell.set_height(1.0/rows)
-            cell.set_width(1.0/cols)
-
-        # Update the color at each frame
-        out = False
-
-        prev_player_tuple, prev_police_tuple = None, None
-
-        def draw_action_in_cell(pos, action):
-            if action == self.STAY:
-                return None
-
-            cell = grid.get_celld()[pos]
-
-            arrow_size_x = cell.get_width()*0.33
-            arrow_size_y = cell.get_width()*0.33
-
-            cell_mid_x = cell.get_x() + 0.5*cell.get_width()
-            cell_mid_y = cell.get_y() + 0.5*cell.get_height()
-
-            dirs = dict()
-            dirs[self.MOVE_DOWN] = (0, -arrow_size_y)
-            dirs[self.MOVE_UP] = (0, arrow_size_y)
-            dirs[self.MOVE_RIGHT] = (arrow_size_x, 0)
-            dirs[self.MOVE_LEFT] = (-arrow_size_x, 0)
-
-            dx, dy = dirs[action]
-
-            return plt.arrow(cell_mid_x - dx/2, cell_mid_y - dy/2, dx, dy, width = 0.005)
-
-        arrows = []
-
-        for t, s in enumerate(path):
-            player_tuple = s.player_pos.unpack()
-            police_tuple = s.police_pos.unpack()
-
-            if prev_player_tuple:
-                if not out:
-                    # set previous player position back to white
-                    grid.get_celld()[prev_player_tuple].set_facecolor(col_map[self.city[prev_player_tuple]])
-                    grid.get_celld()[prev_player_tuple].get_text().set_text('')
-                if self.city[player_tuple] == 2:
-                    grid.get_celld()[player_tuple].set_facecolor(LIGHT_GREEN)
-                    grid.get_celld()[player_tuple].get_text().set_text('Player is out')
-                    out = True
-
-                # set previous police position back to white
-                grid.get_celld()[prev_police_tuple].set_facecolor(col_map[self.city[prev_police_tuple]])
-                grid.get_celld()[prev_police_tuple].get_text().set_text('')
-
-            grid.get_celld()[player_tuple].set_facecolor(LIGHT_ORANGE)
-            grid.get_celld()[player_tuple].get_text().set_text('Player')
-            grid.get_celld()[police_tuple].set_facecolor(LIGHT_PURPLE)
-            grid.get_celld()[police_tuple].get_text().set_text('Police')
-
-            prev_player_tuple, prev_police_tuple = player_tuple, police_tuple
-
-            if policy is not None and (policy.ndim == 1 or t < policy.shape[1]):
-                for a in arrows:
-                    if a is not None:
-                        a.remove()
-                arrows = []
-
-                for draw_pos in Pos.iter(self.city.shape):
-                    if draw_pos == s.police_pos or self.city[draw_pos.unpack()] != 0:
-                        continue
-
-                    draw_state = State(draw_pos, s.police_pos)
-                    if policy.ndim == 1:
-                        draw_action = policy[self.map[draw_state]]
-                    else:
-                        draw_action = policy[self.map[draw_state], t]
-
-                    arrow = draw_action_in_cell(draw_pos.unpack(), draw_action)
-                    if arrow:
-                        arrows.append(arrow)
-
-            # This animation only works in ipython notebook
-            display.display(fig)
-            display.clear_output(wait=True)
-            time.sleep(1)
-
 
 def draw_city(city):
 
@@ -355,7 +185,7 @@ def draw_city(city):
     col_map = {0: WHITE, 1: BLACK, 2: LIGHT_GREEN, -6: LIGHT_RED, -1: LIGHT_RED}
 
     # Give a color to each cell
-    rows, cols    = city.shape
+    rows, cols = city.shape
     colored_city = [[col_map[city[j, i]] for i in range(cols)] for j in range(rows)]
 
     # Create figure of the size of the city
@@ -368,7 +198,7 @@ def draw_city(city):
     ax.set_yticks([])
 
     # Give a color to each cell
-    rows, cols    = city.shape;
+    rows, cols = city.shape
     colored_city = [[col_map[city[j,i]] for i in range(cols)] for j in range(rows)]
 
     # Create figure of the size of the city
@@ -378,7 +208,7 @@ def draw_city(city):
     grid = plt.table(cellText=None,
                             cellColours=colored_city,
                             cellLoc='center',
-                            loc=(0,0),
+                            loc=(0, 0),
                             edges='closed')
     # Modify the hight and width of the cells in the table
     tc = grid.properties()['child_artists']
@@ -387,11 +217,13 @@ def draw_city(city):
         cell.set_width(1.0/cols)
 
 
-def q_learning(env, lambd, eps, n_iter):
+def q_learning(env, lambd, eps, player_start, police_start, n_iter):
     """ Learns the Q using Q learning
         :input City env           : The city environment in which we want to learn the Q
         :input float lambd        : the discount factor (survival prob) lambda
         :input float eps          : the exploration rate epsilon
+        :input tuple player_start : start coordinates of player (player_x, player_y)
+        :input tuple police_start : start coordinates of police (police_x, police_y)
         :input int n_iter         : the number of iterations to run the Q-learning
         :return numpy.array Q     : the learned Q table, dimension S*A
     """
@@ -400,28 +232,28 @@ def q_learning(env, lambd, eps, n_iter):
     # - Action space
     n_states = env.n_states
     n_actions = env.n_actions
-
     Q = np.zeros((n_states, n_actions))
+    s = State(Pos(player_start[0], player_start[1]), Pos(police_start[0], police_start[1]))
 
-    #TODO change this magic number
-    #State((0,0),(3,3))
-    #s = map[state_obj]
-    s = env.states[0]
-    #s = env.start_state
     for t in range(n_iter):
         a = env.get_action(s, eps, Q)
         s_next, curr_reward = env.move(s, a)
+        s_next_index = env.map[s_next]
+        s_index = env.map[s]
         lr = compute_lr(t)
-        Q[s, a] = (1-lr)*Q[s, a] + lr*(curr_reward + lambd*np.max(Q[s_next, :]))
+        best_action = np.max(Q[s_next_index, :])
+        Q[s_index, a] = (1-lr)*Q[s_index, a] + lr*(curr_reward + lambd*best_action)
         s = s_next
     return Q
 
 
-def sarsa(env, lambd, eps, n_iter):
+def sarsa(env, lambd, eps, player_start, police_start, n_iter):
     """ Learns the Q using the SARSA algorithm
         :input City env           : The city environment in which we want to learn the Q
         :input float lambd        : the discount factor (=survival prob) lambda
         :input float eps          : the exploration rate epsilon
+        :input tuple player_start : start coordinates of player (player_x, player_y)
+        :input tuple police_start : start coordinates of police (police_x, police_y)
         :input int n_iter         : the number of iterations to run the Q-learning
         :return numpy.array Q     : the learned Q table, dimension S*A
     """
@@ -432,14 +264,17 @@ def sarsa(env, lambd, eps, n_iter):
     n_actions = env.n_actions
 
     Q = np.zeros((n_states, n_actions))
-    s = env.start_state
+    s = State(Pos(player_start[0], player_start[1]), Pos(police_start[0], police_start[1]))
     a = env.get_action(s, eps, Q)
 
     for t in range(n_iter):
         s_next, curr_reward = env.move(s, a)
         a_next = env.get_action(s_next, eps, Q)
-        curr_lr = compute_lr(t)
-        Q[s, a] = (1-curr_lr)*Q[s, a] + curr_lr*(curr_reward + lambd*Q[s_next, a_next])
+        lr = compute_lr(t)
+        s_index = env.map[s]
+        s_next_index = env.map[s_next]
+        Q[s_index, a] = (1-lr)*Q[s_index, a] + \
+                            lr*(curr_reward + lambd*Q[s_next_index, a_next])
         s = s_next
         a = a_next
     return Q
@@ -452,4 +287,5 @@ def compute_lr(t):
     :param t: the current iteration of the Q-learning / SARSA algorithm
     :return: the current learning rate
     """
-    return 1/(t**(2/3))
+    # start at t+1 to avoid division by 0
+    return 1/((t+1)**(2/3))
