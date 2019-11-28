@@ -3,6 +3,14 @@ import matplotlib.pyplot as plt
 from IPython import display
 import random
 
+# Some colours
+LIGHT_RED    = '#FFC4CC';
+LIGHT_GREEN  = '#95FD99';
+BLACK        = '#000000';
+WHITE        = '#FFFFFF';
+LIGHT_PURPLE = '#E8D0FF';
+LIGHT_ORANGE = '#FAE0C3';
+
 
 class Pos:
     def __init__(self, r, c):
@@ -236,14 +244,33 @@ def q_learning(env, lambd, eps, player_start, police_start, n_iter):
     s = State(Pos(player_start[0], player_start[1]), Pos(police_start[0], police_start[1]))
 
     for t in range(n_iter):
+
         a = env.get_action(s, eps, Q)
         s_next, curr_reward = env.move(s, a)
         s_next_index = env.map[s_next]
         s_index = env.map[s]
         lr = compute_lr(t)
         best_action = np.max(Q[s_next_index, :])
+        """
+        if curr_reward != 0:
+            #print(" t: ", t)
+            #print("s: ", s)
+            #print("a: ", env.actions_names[a])
+            #print("next_s: ", s_next)
+            print("reward: ", curr_reward)
+            print("memory part: ", Q[s_index, a])
+            print("update part: ", (curr_reward + best_action))
+            print("(1-lr)*memory part: ", (1-lr)*Q[s_index, a])
+            print("lr*update part: ", lr*(curr_reward + lambd*best_action))
+            print("those two added together: ", (1-lr)*Q[s_index, a] + lr*(curr_reward + lambd*best_action))
+        """
         Q[s_index, a] = (1-lr)*Q[s_index, a] + lr*(curr_reward + lambd*best_action)
+        """
+        if curr_reward != 0:
+            print("updated Q of this s: ", Q[s_index,:], "the updated value is: ", Q[s_index, a])
+        """
         s = s_next
+
     return Q
 
 
