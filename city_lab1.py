@@ -35,6 +35,9 @@ class Pos:
     def within(self, shape):
         return self.row >= 0 and self.col >= 0 and self.row < shape[0] and self.col < shape[1]
 
+    def copy(self):
+        return Pos(self.row, self.col)
+
     @staticmethod
     def iter(shape):
         for r in range(shape[0]):
@@ -58,6 +61,9 @@ class State:
 
     def is_caught(self):
         return self.player_pos == self.police_pos
+
+    def copy(self):
+        return State(self.player_pos.copy(), self.police_pos.copy())
 
 
 class City:
@@ -91,6 +97,8 @@ class City:
         self.states, self.map         = self.__states()
         self.n_actions                = len(self.actions)
         self.n_states                 = len(self.states)
+
+        self.__moves_cache = dict()
 
     def __actions(self):
         actions = dict()
@@ -130,9 +138,7 @@ class City:
             return random.choice(list(self.actions))
         else:
             # select an action for exploitation
-            # TODO write exploitation = pick optimal action using reward estimate table Q
-            # this is not needed for a with Q-learning but it is needed for eps-greedy SARSA
-            pass
+            return np.argmax(Q[self.map[s], :])
 
     def __moves(self, state, action):
         """ Makes a step in the city, given a current position and an action.
@@ -140,6 +146,12 @@ class City:
 
             :return next state index and corresponding transition prob.
         """
+
+        # cache
+        cached = self.__moves_cache.get((state, action), None)
+        if cached is not None:
+            return cached
+
         # Compute the future position given current (state, action)
         new_player_pos = state.player_pos + self.actions[action]
         # Is the future position possible?
@@ -158,6 +170,8 @@ class City:
             if new_police_pos.within(self.city.shape):
                 next_s = State(new_player_pos, new_police_pos)
                 next_states.append(next_s)
+
+        self.__moves_cache[(state, action)] = next_states
 
         return next_states
 
@@ -239,7 +253,7 @@ def q_learning(env, lambd, eps, player_start, police_start, n_iter):
     Q = np.zeros((n_states, n_actions))
     n = np.zeros((n_states, n_actions)) # number of updates to Q at each point
 
-    s = State(player_start, police_start)
+    s = State(player_start.copy(), police_start.copy())
 
     init_s_index = env.map[s]
 
@@ -300,20 +314,33 @@ def sarsa(env, lambd, eps, player_start, police_start, n_iter):
     n_actions = env.n_actions
 
     Q = np.zeros((n_states, n_actions))
-    s = State(Pos(player_start[0], player_start[1]), Pos(police_start[0], police_start[1]))
+    n = np.zeros((n_states, n_actions)) # number of updates to Q at each point
+
+    s = State(player_start.copy(), police_start.copy())
+
+    init_s_index = env.map[s]
+
+    V_t = [0] # value function for init. state over time
+
     a = env.get_action(s, eps, Q)
 
     for t in range(n_iter):
+        V_t.append(np.max(Q[init_s_index, :]))
+
         s_next, curr_reward = env.move(s, a)
         a_next = env.get_action(s_next, eps, Q)
-        lr = compute_lr(t)
+
         s_index = env.map[s]
         s_next_index = env.map[s_next]
-        Q[s_index, a] = (1-lr)*Q[s_index, a] + \
-                            lr*(curr_reward + lambd*Q[s_next_index, a_next])
+
+        lr = compute_lr(n[s_index, a])
+
+        Q[s_index, a] = (1-lr)*Q[s_index, a] + lr*(curr_reward + lambd*Q[s_next_index, a_next])
+        n[s_index, a] += 1
+
         s = s_next
         a = a_next
-    return Q
+    return Q, V_t
 
 
 def compute_lr(t):
