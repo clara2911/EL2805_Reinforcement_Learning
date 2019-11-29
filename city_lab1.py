@@ -106,9 +106,6 @@ class City:
         map = dict()
         s = 0
         for player_pos in Pos.iter(self.city.shape):
-            if self.city[player_pos.unpack()] == 1:
-                continue
-
             for police_pos in Pos.iter(self.city.shape):
                 new_state = State(player_pos, police_pos)
 
@@ -241,9 +238,16 @@ def q_learning(env, lambd, eps, player_start, police_start, n_iter):
     n_actions = env.n_actions
     Q = np.zeros((n_states, n_actions))
     n = np.zeros((n_states, n_actions)) # number of updates to Q at each point
+
     s = State(player_start, police_start)
 
+    init_s_index = env.map[s]
+
+    V_t = [] # value function for init. state over time
+
     for t in range(n_iter):
+        V_t.append(np.max(Q[init_s_index, :]))
+
         a = env.get_action(s, eps, Q)
 
         s_next, curr_reward = env.move(s, a)
@@ -276,7 +280,7 @@ def q_learning(env, lambd, eps, player_start, police_start, n_iter):
         """
         s = s_next
 
-    return Q
+    return Q, V_t
 
 
 def sarsa(env, lambd, eps, player_start, police_start, n_iter):
