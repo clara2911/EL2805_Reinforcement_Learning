@@ -56,7 +56,7 @@ class State:
     def __str__(self):
         return "Player: {}, Police: {}".format(self.player_pos, self.police_pos)
 
-    def is_dead(self):
+    def is_caught(self):
         return self.player_pos == self.police_pos
 
 
@@ -146,11 +146,10 @@ class City:
         # Compute the future position given current (state, action)
         new_player_pos = state.player_pos + self.actions[action]
         # Is the future position an impossible one ?
-        agent_hitting_city_walls = not new_player_pos.within(self.city.shape) or \
-                                   self.city[new_player_pos.unpack()] == 1
+        move_possible = new_player_pos.within(self.city.shape)
 
         # If we can't move, we stay
-        if agent_hitting_city_walls:
+        if not move_possible:
             new_player_pos = state.player_pos
 
         police_actions = [Pos(0, -1), Pos(0, 1), Pos(-1, 0), Pos(1, 0)]
@@ -169,7 +168,7 @@ class City:
         reward = 0 # standard reward
         next_s = random.choice(self.__moves(state, action))
 
-        if next_s.player_pos == next_s.police_pos:
+        if next_s.is_caught():
             reward += self.POLICE_REWARD
         if self.city[next_s.player_pos.unpack()] == 1:
             reward += self.BANK_REWARD
