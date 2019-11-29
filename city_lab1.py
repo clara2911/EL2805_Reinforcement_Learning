@@ -145,7 +145,7 @@ class City:
         """
         # Compute the future position given current (state, action)
         new_player_pos = state.player_pos + self.actions[action]
-        # Is the future position an impossible one ?
+        # Is the future position possible?
         move_possible = new_player_pos.within(self.city.shape)
 
         # If we can't move, we stay
@@ -229,8 +229,8 @@ def q_learning(env, lambd, eps, player_start, police_start, n_iter):
         :input City env           : The city environment in which we want to learn the Q
         :input float lambd        : the discount factor (survival prob) lambda
         :input float eps          : the exploration rate epsilon
-        :input tuple player_start : start coordinates of player (player_x, player_y)
-        :input tuple police_start : start coordinates of police (police_x, police_y)
+        :input Pos player_start   : start coordinates of player (player_x, player_y)
+        :input Pos police_start   : start coordinates of police (police_x, police_y)
         :input int n_iter         : the number of iterations to run the Q-learning
         :return numpy.array Q     : the learned Q table, dimension S*A
     """
@@ -240,16 +240,21 @@ def q_learning(env, lambd, eps, player_start, police_start, n_iter):
     n_states = env.n_states
     n_actions = env.n_actions
     Q = np.zeros((n_states, n_actions))
-    s = State(Pos(player_start[0], player_start[1]), Pos(police_start[0], police_start[1]))
+    n = np.zeros((n_states, n_actions)) # number of updates to Q at each point
+    s = State(player_start, police_start)
 
     for t in range(n_iter):
-
         a = env.get_action(s, eps, Q)
+
         s_next, curr_reward = env.move(s, a)
-        s_next_index = env.map[s_next]
+
         s_index = env.map[s]
-        lr = compute_lr(t)
-        best_action = np.max(Q[s_next_index, :])
+        s_next_index = env.map[s_next]
+
+        lr = compute_lr(n[s_index, a])
+
+        best_next_Q = np.max(Q[s_next_index, :])
+
         """
         if curr_reward != 0:
             #print(" t: ", t)
@@ -258,12 +263,13 @@ def q_learning(env, lambd, eps, player_start, police_start, n_iter):
             #print("next_s: ", s_next)
             print("reward: ", curr_reward)
             print("memory part: ", Q[s_index, a])
-            print("update part: ", (curr_reward + best_action))
+            print("update part: ", (curr_reward + best_next_Q))
             print("(1-lr)*memory part: ", (1-lr)*Q[s_index, a])
-            print("lr*update part: ", lr*(curr_reward + lambd*best_action))
-            print("those two added together: ", (1-lr)*Q[s_index, a] + lr*(curr_reward + lambd*best_action))
+            print("lr*update part: ", lr*(curr_reward + lambd*best_next_Q))
+            print("those two added together: ", (1-lr)*Q[s_index, a] + lr*(curr_reward + lambd*best_next_Q))
         """
-        Q[s_index, a] = (1-lr)*Q[s_index, a] + lr*(curr_reward + lambd*best_action)
+        Q[s_index, a] = (1-lr)*Q[s_index, a] + lr*(curr_reward + lambd*best_next_Q)
+        n[s_index, a] += 1
         """
         if curr_reward != 0:
             print("updated Q of this s: ", Q[s_index,:], "the updated value is: ", Q[s_index, a])
