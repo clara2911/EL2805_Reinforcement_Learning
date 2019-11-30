@@ -87,7 +87,7 @@ class City:
     # Reward values
     BANK_REWARD = 1
     POLICE_REWARD = -10
-    IMPOSSIBLE_REWARD = -100
+    IMPOSSIBLE_REWARD = 0
 
     def __init__(self, city):
         """ Constructor of the environment City.
@@ -125,6 +125,9 @@ class City:
         return states, map
 
     def __possible_actions(self):
+        """
+        build a dictionary of possible actions at each state
+        """
         possible_actions = dict()
         for s_index, s in self.states.items():
             l = []
@@ -136,7 +139,7 @@ class City:
 
         return possible_actions
 
-    def get_action(self, s_index, eps, Q):
+    def get_action(self, s_index, eps, Q, only_possible = False):
         """
         selects an action from the possible actions at state s.
         :param s: current state
@@ -147,8 +150,10 @@ class City:
         rand = np.random.uniform()
         if rand < eps:
             # select an action for exploration.
-            # list() because we want to select the keys ( "STAY" instead of Pos obj)
-            return random.choice(self.possible_actions[s_index])
+            if only_possible:
+                return random.choice(self.possible_actions[s_index])
+            else:
+                return random.randrange(self.n_actions)
         else:
             # select an action for exploitation
             return np.argmax(Q[s_index, :])
@@ -210,7 +215,7 @@ class City:
         for police_action in police_actions:
             new_police_pos = state.police_pos + police_action
             if new_police_pos.within(self.city.shape):
-                next_s = State(new_player_pos, new_police_pos)
+                next_s = State(new_player_pos.copy(), new_police_pos)
                 next_states.append((next_s, self.reward(next_s, move_possible)))
 
         self.__moves_cache[(state, action)] = next_states
@@ -335,8 +340,8 @@ def sarsa(env, lambd, eps, player_start, police_start, n_iter):
         :input City env           : The city environment in which we want to learn the Q
         :input float lambd        : the discount factor (=survival prob) lambda
         :input float eps          : the exploration rate epsilon
-        :input tuple player_start : start coordinates of player (player_x, player_y)
-        :input tuple police_start : start coordinates of police (police_x, police_y)
+        :input Pos player_start   : start coordinates of player
+        :input Pos police_start   : start coordinates of police
         :input int n_iter         : the number of iterations to run the Q-learning
         :return numpy.array Q     : the learned Q table, dimension S*A
     """
@@ -346,19 +351,22 @@ def sarsa(env, lambd, eps, player_start, police_start, n_iter):
     n_states = env.n_states
     n_actions = env.n_actions
 
-    Q = np.zeros((n_states, n_actions))#(np.random.random((n_states, n_actions))*2 - 1)
-    n = np.zeros((n_states, n_actions)) # number of updates to Q at each point
+    Q = np.zeros((n_states, n_actions))
+    #Q = np.random.random((n_states, n_actions))*2 - 1
+    n = np.zeros((n_states, n_actions), dtype=int) # number of updates to Q at each point
 
     s = State(player_start.copy(), police_start.copy())
 
     init_s_index = env.map[s]
 
     V_t = np.zeros((n_iter,))
+    lr_n = np.zeros((n_iter,))
 
     a = env.get_action(init_s_index, eps, Q)
 
     for t in range(n_iter):
         V_t[t] = np.max(Q[init_s_index, :])
+        lr_n[t] = compute_lr(t) # precompute learning rate, since n <= t
 
         s_next, curr_reward = env.move(s, a)
 
@@ -367,7 +375,7 @@ def sarsa(env, lambd, eps, player_start, police_start, n_iter):
 
         a_next = env.get_action(s_next_index, eps, Q)
 
-        lr = compute_lr(n[s_index, a])
+        lr = lr_n[n[s_index, a]]
 
         Q[s_index, a] = (1-lr)*Q[s_index, a] + lr*(curr_reward + lambd*Q[s_next_index, a_next])
         n[s_index, a] += 1
@@ -386,3 +394,23 @@ def compute_lr(t):
     """
     # start at t+1 to avoid division by 0
     return 1/((t+1)**(2/3))
+
+def compute_slow_lr(t):
+    """
+    A learning rate scheduler that guarantees convergence
+    since sum_t(lr_t) = inf & sum_t(lr_t^2) < inf
+    :param t: the current iteration of the Q-learning / SARSA algorithm
+    :return: the current learning rate
+    """
+    # start at t+1 to avoid division by 0
+    return 1/((t+1)**(3/4))
+
+def compute_fast_lr(t):
+    """
+    A learning rate scheduler that guarantees convergence
+    since sum_t(lr_t) = inf & sum_t(lr_t^2) < inf
+    :param t: the current iteration of the Q-learning / SARSA algorithm
+    :return: the current learning rate
+    """
+    # start at t+1 to avoid division by 0
+    return 1/((t+1)**(4/7))
