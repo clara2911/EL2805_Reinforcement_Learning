@@ -95,6 +95,7 @@ class City:
         self.city                     = city
         self.actions                  = self.__actions()
         self.states, self.map         = self.__states()
+        self.possible_actions         = self.__possible_actions()
         self.n_actions                = len(self.actions)
         self.n_states                 = len(self.states)
 
@@ -123,7 +124,19 @@ class City:
                 s += 1
         return states, map
 
-    def get_action(self, s, eps, Q):
+    def __possible_actions(self):
+        possible_actions = dict()
+        for s_index, s in self.states.items():
+            l = []
+            for a, a_delta in self.actions.items():
+                if (s.player_pos + a_delta).within(self.city.shape):
+                    l.append(a)
+
+            possible_actions[s_index] = l
+
+        return possible_actions
+
+    def get_action(self, s_index, eps, Q):
         """
         selects an action from the possible actions at state s.
         :param s: current state
@@ -135,10 +148,39 @@ class City:
         if rand < eps:
             # select an action for exploration.
             # list() because we want to select the keys ( "STAY" instead of Pos obj)
-            return random.choice(list(self.actions))
+            return random.choice(self.possible_actions[s_index])
         else:
             # select an action for exploitation
-            return np.argmax(Q[self.map[s], :])
+            return np.argmax(Q[s_index, :])
+
+    def get_action_smart(self, s_index, eps, Q, n):
+        """
+        selects an action from the possible actions at state s.
+        :param s_index: current state index
+        :param eps: exploration rate.
+        :param Q: current estimation of rewards (table of dimension S*A)
+        :param n: times action explored
+        :return: selected action a
+        """
+        rand = np.random.uniform()
+        if rand < eps:
+            # select an action for exploration.
+            return np.argmin(n[s_index, :])
+        else:
+            # select an action for exploitation
+            return np.argmax(Q[s_index, :])
+
+    def reward(self, state, move_possible):
+        r = 0
+
+        if state.is_caught():
+            r += self.POLICE_REWARD
+        if self.city[state.player_pos.unpack()] == 1:
+            r += self.BANK_REWARD
+        if not move_possible:
+            r += self.IMPOSSIBLE_REWARD
+
+        return r
 
     def __moves(self, state, action):
         """ Makes a step in the city, given a current position and an action.
@@ -169,23 +211,15 @@ class City:
             new_police_pos = state.police_pos + police_action
             if new_police_pos.within(self.city.shape):
                 next_s = State(new_player_pos, new_police_pos)
-                next_states.append(next_s)
+                next_states.append((next_s, self.reward(next_s, move_possible)))
 
         self.__moves_cache[(state, action)] = next_states
 
         return next_states
 
     def move(self, state, action):
-        reward = 0 # standard reward
-        next_s = random.choice(self.__moves(state, action))
+        next_s, reward = random.choice(self.__moves(state, action))
 
-        if next_s.is_caught():
-            reward += self.POLICE_REWARD
-        if self.city[next_s.player_pos.unpack()] == 1:
-            reward += self.BANK_REWARD
-        agent_stayed = state.player_pos == next_s.player_pos
-        if agent_stayed and action != self.STAY:
-            reward += self.IMPOSSIBLE_REWARD
         return next_s, reward
 
     def show(self):
@@ -198,7 +232,6 @@ class City:
 
 
 def draw_city(city):
-
     # Map a color to each cell in the city
     col_map = {0: WHITE, 1: BLACK, 2: LIGHT_GREEN, -6: LIGHT_RED, -1: LIGHT_RED}
 
@@ -313,25 +346,26 @@ def sarsa(env, lambd, eps, player_start, police_start, n_iter):
     n_states = env.n_states
     n_actions = env.n_actions
 
-    Q = np.zeros((n_states, n_actions))
+    Q = np.zeros((n_states, n_actions))#(np.random.random((n_states, n_actions))*2 - 1)
     n = np.zeros((n_states, n_actions)) # number of updates to Q at each point
 
     s = State(player_start.copy(), police_start.copy())
 
     init_s_index = env.map[s]
 
-    V_t = [0] # value function for init. state over time
+    V_t = np.zeros((n_iter,))
 
-    a = env.get_action(s, eps, Q)
+    a = env.get_action(init_s_index, eps, Q)
 
     for t in range(n_iter):
-        V_t.append(np.max(Q[init_s_index, :]))
+        V_t[t] = np.max(Q[init_s_index, :])
 
         s_next, curr_reward = env.move(s, a)
-        a_next = env.get_action(s_next, eps, Q)
 
         s_index = env.map[s]
         s_next_index = env.map[s_next]
+
+        a_next = env.get_action(s_next_index, eps, Q)
 
         lr = compute_lr(n[s_index, a])
 
