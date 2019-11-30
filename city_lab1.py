@@ -20,6 +20,9 @@ class Pos:
     def __add__(self, o):
         return Pos(self.row + o.row, self.col + o.col)
 
+    def __sub__(self, o):
+        return Pos(self.row - o.row, self.col - o.col)
+
     def __hash__(self):
         return hash((self.row, self.col))
 
@@ -34,6 +37,17 @@ class Pos:
 
     def within(self, shape):
         return self.row >= 0 and self.col >= 0 and self.row < shape[0] and self.col < shape[1]
+
+    def l1_dist(self, o):
+        return math.abs(self.row - o.row) + math.abs(self.col - o.col)
+
+    def l1_normalize(self):
+        def signum(x):
+            if x < 0: return -1
+            if x > 0: return +1
+            else:     return  0
+
+        return Pos(signum(self.row), signum(self.col))
 
     def copy(self):
         return Pos(self.row, self.col)
@@ -89,9 +103,19 @@ class City:
     POLICE_REWARD = -10
     IMPOSSIBLE_REWARD = 0
 
-    def __init__(self, city):
+    def __init__(self, city, restart_when_caught = False, restart_state = None, smart_police = False, rewards = None):
         """ Constructor of the environment City.
         """
+
+        self.restart_when_caught = restart_when_caught
+        self.restart_state = restart_state
+        self.smart_police = smart_police
+
+        if rewards is not None:
+            self.BANK_REWARD = rewards.get("bank", self.BANK_REWARD)
+            self.POLICE_REWARD = rewards.get("police", self.POLICE_REWARD)
+            self.IMPOSSIBLE_REWARD = rewards.get("impossible", self.IMPOSSIBLE_REWARD)
+
         self.city                     = city
         self.actions                  = self.__actions()
         self.states, self.map         = self.__states()
@@ -139,7 +163,7 @@ class City:
 
         return possible_actions
 
-    def get_action(self, s_index, eps, Q, only_possible = False):
+    def get_action(self, s_index, eps, Q, only_possible = True):
         """
         selects an action from the possible actions at state s.
         :param s: current state
@@ -158,29 +182,12 @@ class City:
             # select an action for exploitation
             return np.argmax(Q[s_index, :])
 
-    def get_action_smart(self, s_index, eps, Q, n):
-        """
-        selects an action from the possible actions at state s.
-        :param s_index: current state index
-        :param eps: exploration rate.
-        :param Q: current estimation of rewards (table of dimension S*A)
-        :param n: times action explored
-        :return: selected action a
-        """
-        rand = np.random.uniform()
-        if rand < eps:
-            # select an action for exploration.
-            return np.argmin(n[s_index, :])
-        else:
-            # select an action for exploitation
-            return np.argmax(Q[s_index, :])
-
     def reward(self, state, move_possible):
         r = 0
 
         if state.is_caught():
             r += self.POLICE_REWARD
-        if self.city[state.player_pos.unpack()] == 1:
+        elif self.city[state.player_pos.unpack()] == 1:
             r += self.BANK_REWARD
         if not move_possible:
             r += self.IMPOSSIBLE_REWARD
@@ -199,6 +206,9 @@ class City:
         if cached is not None:
             return cached
 
+        if self.restart_when_caught and state.is_caught():
+            return [(self.restart_state, self.reward(self.restart_state, True))]
+
         # Compute the future position given current (state, action)
         new_player_pos = state.player_pos + self.actions[action]
         # Is the future position possible?
@@ -208,7 +218,26 @@ class City:
         if not move_possible:
             new_player_pos = state.player_pos
 
-        police_actions = [Pos(0, -1), Pos(0, 1), Pos(-1, 0), Pos(1, 0)]
+        if not self.smart_police:
+            police_actions = [Pos(0, -1), Pos(0, 1), Pos(-1, 0), Pos(1, 0)]
+        else:
+            delta = state.player_pos - state.police_pos
+            delta_direction = delta.l1_normalize()
+
+            #print("Delta: {}, delta dir: {}".format(delta, delta_direction))
+
+            # don't move in direction directly opposite to delta
+            police_actions = []
+            if not delta_direction.row == -1:
+                police_actions.append(Pos(1, 0))
+            if not delta_direction.row == 1:
+                police_actions.append(Pos(-1, 0))
+            if not delta_direction.col == -1:
+                police_actions.append(Pos(0, 1))
+            if not delta_direction.col == 1:
+                police_actions.append(Pos(0, -1))
+
+            #print("Actions: {}".format(list(map(str, police_actions))))
 
         next_states = []
         # keep on picking a new move as long as the chosen move is impossible
@@ -236,41 +265,91 @@ class City:
         print(self.map)
 
 
-def draw_city(city):
-    # Map a color to each cell in the city
-    col_map = {0: WHITE, 1: BLACK, 2: LIGHT_GREEN, -6: LIGHT_RED, -1: LIGHT_RED}
+    def draw_city(self, city = None, actions = None, title = None):
+        if city is None:
+            city = self.city
 
-    # Give a color to each cell
-    rows, cols = city.shape
-    colored_city = [[col_map[city[j, i]] for i in range(cols)] for j in range(rows)]
+        # Map a color to each cell in the city
+        col_map = {0: WHITE, 1: LIGHT_GREEN, 2: LIGHT_ORANGE, -6: LIGHT_RED, -1: LIGHT_RED}
 
-    # Create figure of the size of the city
-    fig = plt.figure(1, figsize=(cols, rows))
+        # Give a color to each cell
+        rows, cols = city.shape
+        colored_city = [[col_map[city[j, i]] for i in range(cols)] for j in range(rows)]
 
-    # Remove the axis ticks and add title title
-    ax = plt.gca()
-    ax.set_title('The City')
-    ax.set_xticks([])
-    ax.set_yticks([])
+        # Create figure of the size of the city
+        fig = plt.figure(1, figsize=(cols, rows))
 
-    # Give a color to each cell
-    rows, cols = city.shape
-    colored_city = [[col_map[city[j,i]] for i in range(cols)] for j in range(rows)]
+        # Remove the axis ticks and add title title
+        ax = plt.gca()
+        ax.set_title(title or 'The City')
+        ax.set_xticks([])
+        ax.set_yticks([])
 
-    # Create figure of the size of the city
-    fig = plt.figure(1, figsize=(cols,rows))
+        # Give a color to each cell
+        rows, cols = city.shape
+        colored_city = [[col_map[city[j,i]] for i in range(cols)] for j in range(rows)]
 
-    # Create a table to color
-    grid = plt.table(cellText=None,
-                            cellColours=colored_city,
-                            cellLoc='center',
-                            loc=(0, 0),
-                            edges='closed')
-    # Modify the hight and width of the cells in the table
-    tc = grid.properties()['child_artists']
-    for cell in tc:
-        cell.set_height(1.0/rows)
-        cell.set_width(1.0/cols)
+        # Create figure of the size of the city
+        fig = plt.figure(1, figsize=(cols,rows))
+
+        # Create a table to color
+        grid = plt.table(cellText=None,
+                                cellColours=colored_city,
+                                cellLoc='center',
+                                loc=(0, 0),
+                                edges='closed')
+
+        def draw_action_in_cell(pos, action):
+            if action == self.STAY:
+                return None
+
+            cell = grid[pos]
+            #print(cell)
+
+            arrow_size_x = cell.get_width()*0.33
+            arrow_size_y = cell.get_width()*0.33
+
+            cell_mid_x = cell.get_x() + 0.5*cell.get_width()
+            cell_mid_y = cell.get_y() + 0.5*cell.get_height()
+
+            dirs = dict()
+            dirs[self.MOVE_DOWN] = (0, -arrow_size_y)
+            dirs[self.MOVE_UP] = (0, arrow_size_y)
+            dirs[self.MOVE_RIGHT] = (arrow_size_x, 0)
+            dirs[self.MOVE_LEFT] = (-arrow_size_x, 0)
+
+            dx, dy = dirs[action]
+
+            #print(cell_mid_x, cell_mid_y, dx, dy)
+
+            return plt.arrow(cell_mid_x - dx/2, cell_mid_y - dy/2, dx, dy, width = 0.008)
+
+        # Modify the hight and width of the cells in the table
+        tc = grid.properties()['child_artists']
+        for cell in tc:
+            #print(cell.xy)
+            cell.set_height(1.0/rows)
+            cell.set_width(1.0/cols)
+
+        grid._do_cell_alignment()
+
+        if actions is not None:
+            for pos, action in actions.items():
+                draw_action_in_cell(pos, action)
+
+    def illustrate_policy(self, police_pos, Q, title = None):
+        city = self.city
+        city[police_pos.unpack()] = -1
+
+        actions = dict()
+        for player_pos in Pos.iter(city.shape):
+            s = State(player_pos, police_pos)
+            s_index = self.map[s]
+
+            actions[player_pos.unpack()] = np.argmax(Q[s_index, :])
+            #print("Pos {}, action {}".format(player_pos.unpack(), self.actions_names[np.argmax(Q[s_index, :])]))
+
+        self.draw_city(city, actions, title=title)
 
 
 def q_learning(env, lambd, eps, player_start, police_start, n_iter):
@@ -300,11 +379,11 @@ def q_learning(env, lambd, eps, player_start, police_start, n_iter):
     for t in range(n_iter):
         V_t.append(np.max(Q[init_s_index, :]))
 
-        a = env.get_action(s, eps, Q)
+        s_index = env.map[s]
+        a = env.get_action(s_index, eps, Q)
 
         s_next, curr_reward = env.move(s, a)
 
-        s_index = env.map[s]
         s_next_index = env.map[s_next]
 
         lr = compute_lr(n[s_index, a])
