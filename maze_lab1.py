@@ -4,6 +4,7 @@ import time
 from IPython import display
 import random
 import math
+import scipy.stats as stats
 
 # Implemented methods
 methods = ['DynProg', 'ValIter'];
@@ -87,9 +88,14 @@ class Maze:
     MINOTAUR_REWARD = 0
 
 
-    def __init__(self, maze, weights=None, random_rewards=False, minotaur_stay=False, avoid_minotaur = False):
+    def __init__(self, maze, weights=None, random_rewards=False, minotaur_stay=False, avoid_minotaur = False, min_path = False):
         """ Constructor of the environment Maze.
         """
+
+        if min_path:
+            self.STEP_REWARD = -1
+            self.GOAL_REWARD = 2
+            self.MINOTAUR_REWARD = -1 # make sure getting eaten isn't suddenly more attractive than walking more
 
         if avoid_minotaur:
             self.MINOTAUR_REWARD = self.IMPOSSIBLE_REWARD
@@ -304,21 +310,20 @@ class Maze:
 
         return path
 
-    def survival_rate(self, start, policy, method, exit, num = 10000, survival_factor = None):
+    def survival_rate_simulated(self, start, policy, method, exit, num = 10000, survival_factor = None):
         won = 0;
+        total_path_len = 0
         for i in range(num):
             path = self.simulate(start, policy, method, survival_factor = survival_factor);
             last_state = path[-1]
             if not last_state.is_dead() and last_state.player_pos == exit:
                 won += 1;
+
+            total_path_len += len(path)
         
-        return won/num
+        return won/num, total_path_len/num
 
-    def survival_rate2(self, start, policy, method, exit):
-        if method not in methods:
-            error = 'ERROR: the argument method must be in {}'.format(methods);
-            raise NameError(error);
-
+    def survival_rate_horizon(self, start, policy, exit):
         states = set()
         num_states = dict()
         prob_states = dict()
@@ -652,17 +657,42 @@ def draw_maze(maze):
         cell.set_height(1.0/rows);
         cell.set_width(1.0/cols);
 
-def survival_rates(maze, exit, T_range, minotaur_stay, avoid_minotaur):
-    env = Maze(maze, minotaur_stay = minotaur_stay, avoid_minotaur = avoid_minotaur)
+def survival_rates_dynprog(maze, exit, T_range, **kwargs):
+    """
+    possible kwargs are minotaur_stay, avoid_minotaur, and min_path
+    """
+    env = Maze(maze, **kwargs)
 
     sr = []
 
-    method = "DynProg"
     start = State(Pos(0,0), exit)
 
     for T in T_range:
         V, policy = dynamic_programming(env, T)
 
-        sr.append(env.survival_rate2(start, policy, method, exit))
+        rate = env.survival_rate_horizon(start, policy, exit)
+
+        sr.append(rate)
 
     return sr
+
+def survival_rate_valiter(maze, exit, mean_lifetime, min_steps, **kwargs):
+    """
+    possible kwargs are minotaur_stay, avoid_minotaur, and min_path
+    """
+    env = Maze(maze, **kwargs)
+
+    # Discount Factor
+    gamma = 1 - (1/mean_lifetime);
+    # Accuracy treshold 
+    epsilon = 0.0001;
+    V, policy = value_iteration(env, gamma, epsilon)
+
+    start = State(Pos(0,0), exit)
+
+    rate, avg_path_len = env.survival_rate_simulated(start, policy, "ValIter", exit, survival_factor = gamma)
+
+    print("Survived {:%}, compared to {:%} baseline".format(rate, 1-stats.geom.cdf(min_steps, 1/mean_lifetime)))
+    print("Avg. lifetime ", avg_path_len-1)
+
+    return rate
